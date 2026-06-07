@@ -1,0 +1,81 @@
+{
+  "alert": {
+    "id": "holmes-bridged-v3-001",
+    "title": "[holmes-bridged] checkout p99 latency above SLO",
+    "body": "Root Cause Analysis:                                                            \n\nThe latency issue appears to be caused by:                                      \n\n • Synchronous dependency calls: Each checkout request triggers multiple pricing\n   API calls                                                                    \n • No apparent caching: Every checkout request fetches fresh pricing data       \n • Potential bottleneck: Pricing service handling ~52k requests during the alert\n   period                                                                       \n\nObserved Pattern:                                                               \n\n                                                                                \n checkout request → multiple pricing API calls → response latency accumulation  \n                                                                                \n\nRecommendations:                                                                \n\n 1 Implement caching for pricing data to reduce API calls                       \n 2 Add async processing for non-critical pricing lookups                        \n 3 Monitor pricing service performance and scaling                              \n 4 Consider request batching to pricing service                                 \n 5 Review deployment frequency - 5 revisions suggest instability                \n\nThe alert correctly identified performance degradation likely caused by         \ninefficient service-to-service communication patterns rather than resource      \nconstraints.                                                                    \n────────────────────────────────────────────────────────────────────────────────\n",
+    "severity": "error",
+    "service": "checkout",
+    "metric": "checkout_request_duration_seconds_p99",
+    "threshold": 0.3,
+    "observed": 1.86,
+    "tags": {
+      "service": "checkout",
+      "env": "staging",
+      "team": "payments"
+    },
+    "fired_at": "2026-05-29T19:51:24.392236",
+    "source": "datadog",
+    "repo_path": "sample-app",
+    "target": null,
+    "namespace": null,
+    "slo": {
+      "signal": "p99_ms",
+      "operator": ">",
+      "threshold": 300.0
+    },
+    "raw": {
+      "event_id": "holmes-bridged-v3-001",
+      "alert_title": "[holmes-bridged] checkout p99 latency above SLO",
+      "title": "[holmes-bridged] checkout p99 latency above SLO",
+      "event_msg": "HolmesGPT investigated CheckoutP99High and recommended caching.",
+      "body": "Root Cause Analysis:                                                            \n\nThe latency issue appears to be caused by:                                      \n\n • Synchronous dependency calls: Each checkout request triggers multiple pricing\n   API calls                                                                    \n • No apparent caching: Every checkout request fetches fresh pricing data       \n • Potential bottleneck: Pricing service handling ~52k requests during the alert\n   period                                                                       \n\nObserved Pattern:                                                               \n\n                                                                                \n checkout request → multiple pricing API calls → response latency accumulation  \n                                                                                \n\nRecommendations:                                                                \n\n 1 Implement caching for pricing data to reduce API calls                       \n 2 Add async processing for non-critical pricing lookups                        \n 3 Monitor pricing service performance and scaling                              \n 4 Consider request batching to pricing service                                 \n 5 Review deployment frequency - 5 revisions suggest instability                \n\nThe alert correctly identified performance degradation likely caused by         \ninefficient service-to-service communication patterns rather than resource      \nconstraints.                                                                    \n────────────────────────────────────────────────────────────────────────────────\n",
+      "service": "checkout",
+      "metric": "checkout_request_duration_seconds_p99",
+      "alert_threshold": 0.3,
+      "last_value": 1.86,
+      "alert_transition": "error",
+      "tags": {
+        "service": "checkout",
+        "env": "staging",
+        "team": "payments"
+      }
+    }
+  },
+  "patch": {
+    "summary": "Add in-memory TTL cache for pricing data to reduce API calls",
+    "hypothesis": "The latency issue is caused by synchronous dependency calls where each checkout request triggers multiple pricing API calls with no caching, leading to response latency accumulation",
+    "repro_steps": [
+      "Send multiple checkout requests with the same item_id",
+      "Observe that each request makes a fresh pricing API call",
+      "Measure p99 latency during high traffic"
+    ],
+    "files": [
+      {
+        "path": "app/pricing.py",
+        "before": "\"\"\"Pricing client. HTTP call to `pricing-svc` in the cluster.\n\nWhen PRICING_URL is set (production / cluster-targeted verifier runs), this\nmakes a real HTTP call and the latency comes from the in-cluster pricing pod.\nWhen PRICING_URL is unset (local `make demo`), falls back to an in-process\nsimulator so the scaffold still runs without a cluster.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport os\n\nimport httpx\n\nfrom ._pricing_local import fetch_price_local\n\n\nclass PricingError(Exception):\n    pass\n\n\ndef fetch_price(item_id: str, timeout_ms: int | None = None) -> float:\n    \"\"\"Returns price. Raises PricingError on timeout or downstream error.\"\"\"\n    url = os.environ.get(\"PRICING_URL\")\n    if not url:\n        try:\n            return fetch_price_local(item_id, timeout_ms)\n        except TimeoutError as e:\n            raise PricingError(str(e)) from e\n\n    timeout_s = timeout_ms / 1000 if timeout_ms else None\n    try:\n        r = httpx.get(f\"{url.rstrip('/')}/price/{item_id}\", timeout=timeout_s)\n        r.raise_for_status()\n        return float(r.json()[\"price\"])\n    except (httpx.TimeoutException, httpx.HTTPError) as e:\n        raise PricingError(str(e)) from e",
+        "after": "\"\"\"Pricing client. HTTP call to `pricing-svc` in the cluster.\n\nWhen PRICING_URL is set (production / cluster-targeted verifier runs), this\nmakes a real HTTP call and the latency comes from the in-cluster pricing pod.\nWhen PRICING_URL is unset (local `make demo`), falls back to an in-process\nsimulator so the scaffold still runs without a cluster.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport os\nimport time\nfrom typing import Dict, Tuple\n\nimport httpx\n\nfrom ._pricing_local import fetch_price_local\n\n\nclass PricingError(Exception):\n    pass\n\n\n# In-memory TTL cache for pricing data\n_cache: Dict[str, Tuple[float, float]] = {}  # item_id -> (price, expiry_time)\n_cache_ttl_seconds = 300  # 5 minutes\n\n\ndef _get_cached_price(item_id: str) -> float | None:\n    \"\"\"Returns cached price if valid, None if expired or not found.\"\"\"\n    if item_id not in _cache:\n        return None\n    \n    price, expiry_time = _cache[item_id]\n    if time.time() > expiry_time:\n        del _cache[item_id]\n        return None\n    \n    return price\n\n\ndef _cache_price(item_id: str, price: float) -> None:\n    \"\"\"Cache price with TTL expiry.\"\"\"\n    expiry_time = time.time() + _cache_ttl_seconds\n    _cache[item_id] = (price, expiry_time)\n\n\ndef fetch_price(item_id: str, timeout_ms: int | None = None) -> float:\n    \"\"\"Returns price. Raises PricingError on timeout or downstream error.\"\"\"\n    # Check cache first\n    cached_price = _get_cached_price(item_id)\n    if cached_price is not None:\n        return cached_price\n    \n    url = os.environ.get(\"PRICING_URL\")\n    if not url:\n        try:\n            price = fetch_price_local(item_id, timeout_ms)\n            _cache_price(item_id, price)\n            return price\n        except TimeoutError as e:\n            raise PricingError(str(e)) from e\n\n    timeout_s = timeout_ms / 1000 if timeout_ms else None\n    try:\n        r = httpx.get(f\"{url.rstrip('/')}/price/{item_id}\", timeout=timeout_s)\n        r.raise_for_status()\n        price = float(r.json()[\"price\"])\n        _cache_price(item_id, price)\n        return price\n    except (httpx.TimeoutException, httpx.HTTPError) as e:\n        raise PricingError(str(e)) from e"
+      }
+    ],
+    "confidence": 0.9,
+    "expected_signal_change": "Reduced pricing API calls for repeated item_ids should decrease p99 latency by eliminating redundant network requests",
+    "model": "claude-bridge-from-holmes"
+  },
+  "baseline": {
+    "duration_ms_p50": 529.8231250017125,
+    "duration_ms_p99": 2162.490666996746,
+    "error_rate": 0.0,
+    "request_count": 100,
+    "raw_log": ""
+  },
+  "patched": {
+    "duration_ms_p50": 0.8625619957456365,
+    "duration_ms_p99": 2010.2620840043528,
+    "error_rate": 0.0,
+    "request_count": 100,
+    "raw_log": ""
+  },
+  "result": "reject",
+  "rationale": "Alert would still be firing post-merge. SLO `p99_ms > 300.0` (baseline 2162.491, patched 2010.262).",
+  "preview": null,
+  "generated_at": "2026-05-29T19:53:01.612184"
+}
