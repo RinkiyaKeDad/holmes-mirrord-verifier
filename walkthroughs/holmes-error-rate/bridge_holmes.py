@@ -65,7 +65,7 @@ def main():
     source = read_source()
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     resp = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=4096,
         system=SYSTEM,
         messages=[{"role": "user", "content":
