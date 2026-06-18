@@ -2,7 +2,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
-demo/out/
 # local cluster credentials and scratch working dir — never commit
 *kubeconfig*
 civo/

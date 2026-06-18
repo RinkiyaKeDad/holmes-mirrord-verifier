@@ -19,7 +19,6 @@ COPY src/ /srv/src/
 RUN pip install --no-cache-dir -e .
 
 COPY sample-app/ /scaffold/sample-app/
-COPY scenarios/ /scaffold/scenarios/
 
 ENV VERIFIER_SAMPLE_REPO=/scaffold/sample-app
 EXPOSE 8000

@@ -46,28 +46,29 @@ class MirrordRunner:
         """Spawn `command` under `mirrord exec`. Returns the Popen handle so the
         engine can wait for readiness, drive load, then SIGTERM.
 
-        Falls back to running `command` directly (no mirrord wrap) when
-        mirrord isn't on PATH or no target is set — the verdict is still
-        meaningful, just no live-cluster steering.
+        Requires both the mirrord binary and a target: this demo only produces a
+        meaningful verdict when the candidate runs against the real cluster.
         """
         env = {**os.environ, **(extra_env or {}), "VERIFIER_RUN_LABEL": label}
         resolved = shutil.which(self.binary)
-        wrapped = bool(resolved) and bool(self.target)
-
-        if wrapped:
-            argv = [
-                resolved, "exec",
-                "--target", self.target,
-                "--target-namespace", self.namespace,
-                "--", *command,
-            ]
-            log.info("mirrord exec [%s]: cwd=%s argv=%s", label, cwd, argv)
-        else:
-            argv = command
-            log.warning(
-                "LOCAL-ONLY run [%s] — mirrord=%s target=%s. Cluster steering disabled.",
-                label, resolved, self.target,
+        if not resolved:
+            raise RuntimeError(
+                f"mirrord binary not found on PATH (looked for {self.binary!r}); "
+                "this demo runs the candidate against a real cluster via mirrord."
             )
+        if not self.target:
+            raise RuntimeError(
+                "MIRRORD_TARGET is not set; this demo runs the candidate against a "
+                "real cluster via mirrord (e.g. MIRRORD_TARGET=deploy/checkout)."
+            )
+
+        argv = [
+            resolved, "exec",
+            "--target", self.target,
+            "--target-namespace", self.namespace,
+            "--", *command,
+        ]
+        log.info("mirrord exec [%s]: cwd=%s argv=%s", label, cwd, argv)
 
         # Pipe stdout/stderr to PIPE so we can drain them after termination;
         # otherwise a chatty server can fill the pipe buffer and stall.

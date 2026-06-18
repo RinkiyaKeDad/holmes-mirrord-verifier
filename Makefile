@@ -1,4 +1,4 @@
-.PHONY: install demo serve sample-smoke sample-replay lint clean
+.PHONY: install clean
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -7,6 +7,9 @@ PIP := $(VENV)/bin/pip
 # Use uv if it's on PATH (faster). Otherwise fall back to venv + pip.
 UV := $(shell command -v uv 2>/dev/null)
 
+# Local venv is only needed to run the bridge step (the Claude call that turns a
+# HolmesGPT report into a patch). The verifier itself runs in-cluster — see the
+# README for the cluster walkthrough.
 install:
 ifdef UV
 	uv sync
@@ -16,18 +19,6 @@ else
 	$(PIP) install -e .
 endif
 
-demo:
-	./demo/run-demo.sh
-
-serve:
-	$(PY) -m verifier.cli serve --port 8000
-
-sample-smoke:
-	cd sample-app && PYTHONPATH=. ../$(PY) -m app smoke
-
-sample-replay:
-	cd sample-app && PYTHONPATH=. ../$(PY) -m app replay
-
 clean:
-	rm -rf demo/out $(VENV) src/verifier/__pycache__ src/verifier.egg-info
+	rm -rf $(VENV) src/verifier/__pycache__ src/verifier.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} +
