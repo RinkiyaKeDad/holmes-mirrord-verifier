@@ -2,6 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: checkout-slo
+  namespace: verifier-poc
   labels:
     release: monitoring
 spec:

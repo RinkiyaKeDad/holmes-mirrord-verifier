@@ -99,7 +99,7 @@ spec:
       serviceAccountName: verifier
       containers:
         - name: verifier
-          image: gcr.io/mirrord-test/mirrord-sre-verifier:dev
+          image: docker.io/rinkiyakedad/mirrord-sre-verifier:dev
           imagePullPolicy: Always
           ports:
             - name: http

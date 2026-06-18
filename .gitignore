@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 .env
 demo/out/
+# local cluster credentials and scratch working dir — never commit
+*kubeconfig*
+civo/
 .ruff_cache/
 *.egg-info/
 dist/

@@ -1,0 +1,36 @@
+# Continuous traffic generator for checkout (the `loadgen` pod from Part II).
+# Rotates item-0..item-9 so that ~10% of requests target item-3 (the error-rate
+# scenario) and every request exercises the pricing tail-latency.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: verifier-poc
+  labels:
+    app: loadgen
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: curlimages/curl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              i=0
+              while true; do
+                item="item-$((i % 10))"
+                curl -s -o /dev/null -m 5 \
+                  -X POST "http://checkout/checkout" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"item_id\":\"$item\",\"qty\":1}" || true
+                i=$((i + 1))
+                sleep 0.1
+              done
