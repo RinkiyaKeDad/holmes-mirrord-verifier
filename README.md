@@ -372,9 +372,31 @@ alert. That's what the verifier answers.
 
 ### 6b. Bridge the report into a code patch
 
-The bridge is ~80 lines around the Anthropic SDK. It reads Holmes' report plus
-the service source and emits a structured patch that *faithfully implements*
-Holmes' top recommendation (here: an in-memory cache). It runs locally:
+**What is the bridge, and why does it run locally?** HolmesGPT's output is
+*prose* ("root cause… recommendation: add caching"). The verifier can't run
+prose — to prove a fix it needs a concrete **code patch** (the exact old and new
+contents of a file) so it can apply it and run baseline-vs-patched. The bridge
+is the translator that closes that gap. It's a ~80-line script
+(`walkthroughs/holmes-latency/bridge_holmes.py`) that makes **one Claude call**
+with two inputs — Holmes' report and the service's source — and a prompt that
+says *"faithfully implement exactly what Holmes recommended, output a JSON
+patch."* It emits a scenario file with a `prepared_patch` (`files[].before` /
+`after`).
+
+```
+Holmes report  ─┐
+                ├──►  bridge (one Claude call)  ──►  scenario.json (before/after patch)
+service source ─┘
+```
+
+The "faithful translator" framing is deliberate: if the bridge silently wrote a
+*correct* fix, Scenario 2 could never REJECT. It implements Holmes' caching idea
+verbatim, and the verifier then shows caching doesn't clear the p99.
+
+It runs **locally** because it needs no cluster access — only the Anthropic key
+and the source, both of which are already on your machine (the bridge scripts
+live in the repo, not in any image). It's not fundamental to the architecture:
+the blog runs the same call *inside* the verifier pod. Run it locally now:
 
 ```bash
 set -a; . ./.env; set +a    # export ANTHROPIC_API_KEY
