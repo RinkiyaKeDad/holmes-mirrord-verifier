@@ -328,9 +328,31 @@ kubectl exec -n verifier-poc deploy/holmesgpt-holmes -- sh -c \
  > /tmp/holmes-out-v3.txt
 ```
 
-> **Two gotchas, baked into the command above.** The Holmes pod has a read-only
-> root filesystem, so set `HOME=/tmp` (it writes a toolset cache to `~/.holmes`).
-> And the CLI is at `/app/holmes_cli.py`, not on `PATH`.
+What this command does, piece by piece:
+
+- `kubectl exec -n verifier-poc deploy/holmesgpt-holmes -- …` — run a command
+  *inside* the already-running HolmesGPT pod (kubectl resolves the Deployment to
+  one of its pods). Everything after `--` is the command for the pod, not flags
+  for kubectl.
+- `sh -c '…'` — run the quoted string as a shell script in the pod (we need a
+  shell because it uses `cd`, an env var, and `&&`).
+- `cd /app && HOME=/tmp python holmes_cli.py …` — the CLI lives at
+  `/app/holmes_cli.py` (it isn't on `PATH`). `HOME=/tmp` works around the pod's
+  **read-only root filesystem**: Holmes writes a cache to `~/.holmes`, so we
+  point `HOME` at a writable dir. Without it you get
+  `Read-only file system: '/root/.holmes'`.
+- `investigate alertmanager` — Holmes' mode for investigating a Prometheus/
+  Alertmanager alert. It then runs its own agent loop (kubectl, pod logs,
+  configs) and prints a markdown root-cause report.
+- `--alertmanager-url http://monitoring-kube-prometheus-alertmanager.monitoring:9093`
+  — the in-cluster DNS name of the Alertmanager Service (in the `monitoring`
+  namespace, port 9093) to pull the alert from.
+- `--alertmanager-alertname CheckoutP99High` — investigate only this alert.
+- `--model "anthropic/claude-sonnet-4-6"` — the LLM Holmes reasons with (the
+  Anthropic key is already an env var in the pod, set by the Helm chart).
+- `> /tmp/holmes-out-v3.txt` — this redirect is *outside* the quotes, so it runs
+  on **your** machine: kubectl streams the pod's stdout back, and `>` saves it to
+  a local file that the bridge step reads next.
 
 Holmes runs an agentic loop (kubectl, logs, config) for ~30–60s and produces a
 markdown report. Sample (trimmed):
