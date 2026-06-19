@@ -83,7 +83,7 @@ plausible-but-wrong fix.
 
 - A Kubernetes cluster with the **mirrord operator** installed
   ([install docs](https://metalbear.com/mirrord/docs/operator/setup/installation)).
-  The operator requires a license (MetalBear employees / trial users have one).
+  The operator requires a license (free trial, no credit card required).
 - `kubectl`, `helm`, `docker` (with `buildx`), and `uv` installed locally.
 - A container registry you can push to and the cluster can pull from
   (Docker Hub, GHCR, etc.).

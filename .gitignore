@@ -10,3 +10,4 @@ civo/
 dist/
 build/
 .DS_Store
+uv.lock
