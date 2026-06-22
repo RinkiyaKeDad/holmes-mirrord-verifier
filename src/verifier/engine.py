@@ -51,14 +51,18 @@ from .models import (
 log = logging.getLogger("verifier.engine")
 
 # Regression watchlist used alongside the alert's own SLO check.
-# Tuple is (kind, tolerance). 'rel' = relative growth, 'abs' = absolute growth.
-# The signal the alert itself fires on is excluded — improving that one is the
-# point; regressing it would mean the alert is still firing, which the SLO
-# check catches.
-DEFAULT_WATCHLIST: dict[SloSignal, tuple[str, float]] = {
-    SloSignal.P50_MS: ("rel", 0.05),       # p50 may grow up to 5% relative
-    SloSignal.P99_MS: ("rel", 0.10),       # p99 may grow up to 10% relative
-    SloSignal.ERROR_RATE: ("abs", 0.01),   # error rate may rise up to 1 pp
+# Each rule is (kind, tolerance, abs_floor). For 'rel' signals a regression is
+# flagged only when the signal grows by more than `tolerance` (a fraction) AND
+# by more than `abs_floor` in absolute units. The absolute floor stops
+# small-sample measurement noise on a tiny p50 — e.g. 95ms -> 125ms, a +31%
+# wobble worth 30ms — from tripping a false regression; a genuine blow-up
+# (hundreds of ms) still clears both bars. For 'abs' signals only `tolerance`
+# applies (abs_floor unused). The signal the alert itself fires on is excluded —
+# improving that one is the point, and the SLO check already covers it.
+DEFAULT_WATCHLIST: dict[SloSignal, tuple[str, float, float]] = {
+    SloSignal.P50_MS: ("rel", 0.20, 75.0),      # p50: >20% AND >75ms
+    SloSignal.P99_MS: ("rel", 0.20, 150.0),     # p99: >20% AND >150ms
+    SloSignal.ERROR_RATE: ("abs", 0.01, 0.0),   # error rate may rise up to 1 pp
 }
 
 # Legacy classifier thresholds, used only when the alert has no Slo attached.
@@ -244,15 +248,16 @@ class VerificationEngine:
 
         # 2. Regression watchlist: did any other signal degrade past tolerance?
         regressions: list[str] = []
-        for sig, (kind, tol) in DEFAULT_WATCHLIST.items():
+        for sig, (kind, tol, abs_floor) in DEFAULT_WATCHLIST.items():
             if sig == alert.slo.signal:
                 continue
             b = _signal_value(baseline, sig)
             p = _signal_value(patched, sig)
             if kind == "rel":
-                if b > 0 and (p - b) / b > tol:
+                if b > 0 and (p - b) / b > tol and (p - b) > abs_floor:
                     regressions.append(
-                        f"{sig.value} regressed {(p - b) / b:+.0%} (>{tol:.0%} tolerance)"
+                        f"{sig.value} regressed {(p - b) / b:+.0%} "
+                        f"(+{p - b:.0f}ms; needs >{tol:.0%} and >{abs_floor:.0f}ms)"
                     )
             else:  # abs
                 if p - b > tol:
