@@ -453,7 +453,7 @@ verifier carries).
    docker buildx build --platform linux/amd64 --provenance=false \
      -t $REGISTRY/mirrord-sre-verifier-sample:dev --push sample-app
    docker buildx build --platform linux/amd64 --provenance=false \
-     -t $REGISTRY/mirrord-sre-verifier:dev       --push .
+     -t $REGISTRY/mirrord-sre-verifier:dev --push .
    kubectl rollout restart deployment/checkout deployment/verifier -n verifier-poc
    ```
 
