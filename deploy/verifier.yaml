@@ -118,6 +118,17 @@ spec:
             # latency comes from the in-cluster pricing pod, not the local sim.
             - name: PRICING_URL
               value: "http://pricing.verifier-poc.svc.cluster.local"
+            # On an alert, the verifier execs the HolmesGPT CLI in its pod to
+            # investigate, then bridges the report to a patch. These point it at
+            # the Holmes pod and the in-cluster Alertmanager.
+            - name: HOLMES_NAMESPACE
+              value: "verifier-poc"
+            - name: HOLMES_LABEL_SELECTOR
+              value: "app.kubernetes.io/name=holmes"
+            - name: ALERTMANAGER_URL
+              value: "http://monitoring-kube-prometheus-alertmanager.monitoring:9093"
+            - name: HOLMES_MODEL
+              value: "anthropic/claude-sonnet-4-6"
           readinessProbe:
             httpGet:
               path: /healthz

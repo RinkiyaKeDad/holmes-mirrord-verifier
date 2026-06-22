@@ -27,6 +27,11 @@ spec:
             repo_path: "/scaffold/sample-app"
             verifier_target: "deploy/checkout"
             verifier_namespace: "verifier-poc"
+            # The alert's SLO, so the verifier can ask "would this still fire on
+            # the patched code?". p99 latency in ms (300ms = the 0.3s rule above).
+            verifier_slo_signal: "p99_ms"
+            verifier_slo_operator: ">"
+            verifier_slo_threshold: "300"
 
         - alert: CheckoutErrorRateHigh
           expr: |
@@ -44,3 +49,7 @@ spec:
             repo_path: "/scaffold/sample-app"
             verifier_target: "deploy/checkout"
             verifier_namespace: "verifier-poc"
+            # The alert's SLO: error rate as a fraction (0.05 = the 5% rule above).
+            verifier_slo_signal: "error_rate"
+            verifier_slo_operator: ">"
+            verifier_slo_threshold: "0.05"

@@ -21,7 +21,15 @@ logging.basicConfig(
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from .engine import VerificationEngine
-from .models import Alert, PreviewArtifact, Severity, VerificationResult
+from .models import (
+    Alert,
+    PreviewArtifact,
+    Severity,
+    Slo,
+    SloOperator,
+    SloSignal,
+    VerificationResult,
+)
 from .poster import StdoutPoster
 
 log = logging.getLogger("verifier.webhook")
@@ -29,19 +37,29 @@ log = logging.getLogger("verifier.webhook")
 app = FastAPI(title="mirrord-sre-verifier", version="0.1.0")
 
 # INTEGRATION: in production these are constructed per-tenant from config.
-# Lazy so importing this module doesn't require ANTHROPIC_API_KEY.
-_orchestrator = None
+# Lazy so importing this module doesn't require ANTHROPIC_API_KEY / a kubeconfig.
+_holmes = None
+_bridge = None
 _engine: VerificationEngine | None = None
 _poster: StdoutPoster | None = None
 
 
-def _get_orchestrator():
-    global _orchestrator
-    if _orchestrator is None:
-        from .orchestrator import AISREOrchestrator
+def _get_holmes():
+    global _holmes
+    if _holmes is None:
+        from .holmes_client import HolmesInvestigator
 
-        _orchestrator = AISREOrchestrator()
-    return _orchestrator
+        _holmes = HolmesInvestigator()
+    return _holmes
+
+
+def _get_bridge():
+    global _bridge
+    if _bridge is None:
+        from .bridge import Bridge
+
+        _bridge = Bridge()
+    return _bridge
 
 
 def _get_engine() -> VerificationEngine:
@@ -95,8 +113,12 @@ def parse_alertmanager_payload(payload: dict[str, Any]) -> list[Alert]:
     pipeline. AM webhook schema:
     https://prometheus.io/docs/alerting/latest/configuration/#webhook_config
 
-    The repo location and mirrord target are read from the rule's annotations:
-      repo_path, verifier_target, verifier_namespace
+    The repo location, mirrord target, and the alert's SLO are read from the
+    rule's annotations:
+      repo_path, verifier_target, verifier_namespace,
+      verifier_slo_signal, verifier_slo_operator, verifier_slo_threshold
+    The SLO is what lets the engine answer "would this alert still be firing on
+    the patched code?" instead of falling back to generic improvement heuristics.
     """
     if payload.get("version") not in (None, "4"):
         raise HTTPException(status_code=400, detail=f"unsupported AM version {payload.get('version')}")
@@ -127,9 +149,28 @@ def parse_alertmanager_payload(payload: dict[str, Any]) -> list[Alert]:
             repo_path=Path(annotations["repo_path"]) if annotations.get("repo_path") else None,
             target=annotations.get("verifier_target"),
             namespace=annotations.get("verifier_namespace"),
+            slo=_parse_slo(annotations),
             raw=item,
         ))
     return out
+
+
+def _parse_slo(annotations: dict[str, Any]) -> Slo | None:
+    """Build the alert's SLO from rule annotations, if all three are present."""
+    signal = annotations.get("verifier_slo_signal")
+    operator = annotations.get("verifier_slo_operator")
+    threshold = annotations.get("verifier_slo_threshold")
+    if not (signal and operator and threshold):
+        return None
+    try:
+        return Slo(
+            signal=SloSignal(signal),
+            operator=SloOperator(operator),
+            threshold=float(threshold),
+        )
+    except (ValueError, KeyError) as e:
+        log.warning("ignoring malformed SLO annotations (%s): %s", e, annotations)
+        return None
 
 
 @app.post("/webhook/datadog")
@@ -184,9 +225,13 @@ async def debug() -> dict[str, Any]:
 
 
 async def _run_pipeline(alert: Alert) -> None:
-    """Two-stage flow: exec-verify (always) → preview env (only on PASS)."""
+    """Full blog-faithful loop: HolmesGPT investigates the alert → the bridge
+    turns its report into a patch → the engine verifies the patch under mirrord
+    → (on PASS) a preview env is built for human inspection.
+    """
     try:
-        patch = await asyncio.to_thread(_get_orchestrator().propose_patch, alert)
+        report = await asyncio.to_thread(_get_holmes().investigate, alert)
+        patch = await asyncio.to_thread(_get_bridge().report_to_patch, alert, report)
         bundle = await asyncio.to_thread(_get_engine().verify, alert, patch)
 
         if bundle.result == VerificationResult.PASS:
