@@ -44,7 +44,7 @@ class HolmesInvestigator:
     ) -> None:
         self.namespace = namespace or os.environ.get("HOLMES_NAMESPACE", "verifier-poc")
         self.label_selector = label_selector or os.environ.get(
-            "HOLMES_LABEL_SELECTOR", "app.kubernetes.io/name=holmes"
+            "HOLMES_LABEL_SELECTOR", "app=holmes"
         )
         self.alertmanager_url = alertmanager_url or os.environ.get(
             "ALERTMANAGER_URL",

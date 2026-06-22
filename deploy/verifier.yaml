@@ -124,7 +124,7 @@ spec:
             - name: HOLMES_NAMESPACE
               value: "verifier-poc"
             - name: HOLMES_LABEL_SELECTOR
-              value: "app.kubernetes.io/name=holmes"
+              value: "app=holmes"
             - name: ALERTMANAGER_URL
               value: "http://monitoring-kube-prometheus-alertmanager.monitoring:9093"
             - name: HOLMES_MODEL
